@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import math
 import re
@@ -114,7 +113,7 @@ def inspect(path: Path) -> tuple[dict, list[str]]:
     summary = {
         "tool": "LabBench Lite",
         "version": __version__,
-        "source": {"name": path.name, "size_bytes": before.st_size, "sha256": hashlib.sha256(data).hexdigest()},
+        "source": {"name": path.name, "size_bytes": before.st_size},
         "analysis": {
             "rows": len(rows),
             "columns": len(header),
@@ -245,7 +244,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(raw)
     if args.command == "apply":
         plan = json.loads(args.plan.read_text(encoding="utf-8")); source = args.source
-        if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != plan["source_sha256"]: print(json.dumps({"status": "stopped", "reason": "source_changed_or_missing"}), file=sys.stderr); return 3
+        if not source.is_file(): print(json.dumps({"status": "stopped", "reason": "source_changed_or_missing"}), file=sys.stderr); return 3
+        stat = source.stat()
+        if stat.st_size != plan["source_size_bytes"] or stat.st_mtime_ns != plan["source_mtime_ns"]: print(json.dumps({"status": "stopped", "reason": "source_changed_or_missing"}), file=sys.stderr); return 3
         header, rows, _, delimiter, _ = read_csv(source); cleaned, changes = transform_rows(header, rows, plan["operations"]); args.out.mkdir(parents=True, exist_ok=True); target = args.out / f"{source.stem}.cleaned.csv"; write_csv(target, header, cleaned, delimiter); (args.out / "apply_report.json").write_text(json.dumps({"source": source.name, "changes": changes, "rows_before": len(rows), "rows_after": len(cleaned)}, ensure_ascii=False, indent=2), encoding="utf-8"); print(json.dumps({"status": "success", "out": str(target), "rows": len(cleaned)}, ensure_ascii=False)); return 0
     if args.command is None: parser.print_help(); return 2
     operations = {"trim_text": getattr(args, "trim_text", False), "drop_empty_rows": getattr(args, "drop_empty_rows", False), "drop_duplicates": getattr(args, "drop_duplicates", False), "fill_missing": {"strategy": getattr(args, "fill_missing", "none"), "columns": getattr(args, "column", [])}}
@@ -256,7 +257,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             summary, _ = inspect(source); write_outputs(summary, out)
             figures = write_figures(source, summary, out) if getattr(args, "figures", False) else []
-            if args.command == "clean": (out / "cleaning_plan.json").write_text(json.dumps({"version": 1, "source_name": source.name, "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(), "operations": operations, "preview_only": True}, ensure_ascii=False, indent=2), encoding="utf-8")
+            if args.command == "clean":
+                stat = source.stat()
+                (out / "cleaning_plan.json").write_text(json.dumps({"version": 2, "source_name": source.name, "source_size_bytes": stat.st_size, "source_mtime_ns": stat.st_mtime_ns, "operations": operations, "preview_only": True}, ensure_ascii=False, indent=2), encoding="utf-8")
         except (OSError, UnicodeError, csv.Error, ValueError) as exc: print(json.dumps({"status": "stopped", "file": source.name, "reason": str(exc)}, ensure_ascii=False), file=sys.stderr); return 3
         results.append({"status": "success", "file": source.name, "rows": summary["analysis"]["rows"], "columns": summary["analysis"]["columns"], "out": str(out), "figures": figures})
     print(json.dumps(results[0] if len(results) == 1 else {"status": "success", "files": results}, ensure_ascii=False)); return 0

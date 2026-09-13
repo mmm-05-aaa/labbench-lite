@@ -24,6 +24,6 @@ After reviewing `preview/cleaning_plan.json`, explicitly apply it to a new direc
 python -m labbench.cli apply preview/cleaning_plan.json --source data.csv --out cleaned
 ```
 
-The plan stores only the source filename and SHA-256, not an absolute local path.
+The plan stores the source filename, size and modification time, not an absolute local path.
 
 The repository contains only synthetic example data. Real research CSV files should remain outside Git and be reviewed by the data owner before local testing.
